@@ -188,7 +188,7 @@ const SPECIES = {
     light:"Kirkas, muutama tunti suoraa aurinkoa", sens:"Viileän ja kostean yhdistelmä, veto, paikan vaihto (pudottaa lehtiä)" },
   sansevieria:{ name:"Anopinkieli", latin:"Sansevieria trifasciata", ph:[5.5,7.5], temp:[16,28], dryDays:21, fertSummer:60, fertWinter:0,
     light:"Joustava, valoisasta puolivarjoon", sens:"Viileän ja kostean yhdistelmä (juurimätä), ylikastelu talvella" },
-  chili:{ name:"Chili", latin:"Capsicum", ph:[6.0,6.8], temp:[18,30], dryDays:2, fertSummer:7, fertWinter:30,
+  chili:{ name:"Chili Lemon Drop", latin:"Capsicum baccatum 'Lemon Drop'", ph:[6.0,6.8], temp:[18,30], dryDays:2, fertSummer:7, fertWinter:30,
     light:"Täysi aurinko, talvella kasvivalo", sens:"Kylmä alle 15 °C pysäyttää kasvun, halla tuhoaa. Siirrä sisälle syksyllä" },
   spider:{ name:"Rönsylilja", latin:"Chlorophytum comosum", ph:[6.0,7.0], temp:[15,26], dryDays:5, fertSummer:30, fertWinter:0,
     light:"Kirkas epäsuora valo", sens:"Hanaveden fluoridi, kalkki ja kloori (ruskeat lehdenkärjet), suora paahde" },
@@ -207,7 +207,7 @@ const PLANTS = [
   {id:"p3", sp:"calathea", floor:"k1", room:"Olohuone", label:"Aalto Maija"},
   {id:"p4", sp:"ficus", floor:"k1", room:"Keittiö", label:"Bonsai (Ficus retusa)"},
   {id:"p5", sp:"sansevieria", floor:"k1", room:"Keittiö", label:"Anopinkieli"},
-  {id:"p6", sp:"chili", floor:"k2", room:"2. kerros", label:"Chili"},
+  {id:"p6", sp:"chili", floor:"k2", room:"2. kerros", label:"Chili Lemon Drop"},
   {id:"p7", sp:"spider", floor:"k2", room:"2. kerros", label:"Rönsylilja"},
   {id:"p8", sp:"pothos", floor:"k2", room:"2. kerros", label:"Kultaköynnös, 2. kerros", size:"l"},
   {id:"p9", sp:"dieffenbachia", floor:"k2", room:"2. kerros", label:"Kirjovehka"},
@@ -479,8 +479,15 @@ const ART = {
         const L=20+r()*10, W=7; const ang=(x-100)*1.6+(r()-0.5)*50+st.droop*35*(x>100?1:-1);
         s+=`<g transform="translate(${x},${y}) rotate(${ang})">${leaf(lanceolate(L,W),id,pal,L,W,"",pal.light)}</g>`;
       }
-      const fx=x1+(r()-0.5)*10, fy=y1+dy+8+r()*10; const ripe=si%2===0;
-      s+=`<g transform="translate(${fx},${fy}) rotate(${(fx-100)*0.8+st.droop*20})"><path d="M0,0 L0,8" stroke="${pal.dark}" stroke-width="1.6"/><path d="M-4,8 C-6,20 -3,34 1,40 C5,34 6,20 4,8Z" fill="${ripe?"#c8392b":"#5d9a3a"}"/><path d="M-2,10 C-3,20 -1,30 1,36" stroke="#fff" stroke-width="1.4" opacity=".35" fill="none"/></g>`;
+      // Lemon Drop: pitkänomaiset, ryppyiset, riippuvat sitruunankeltaiset hedelmät, osa vielä raakoja
+      for(let k=0;k<2;k++){
+        const fx=x1+(r()-0.5)*14-(k?(x1-x0)*0.3:0), fy=y1+dy+6+r()*10-(k?(y1-y0)*0.3:0); const ripe=(si+k)%3!==2;
+        const body=ripe?mix("#f4d21c","#c9b25a",st.cold*0.4):"#86b33e", shade=ripe?"#c99a0e":"#5b8a2c";
+        s+=`<g transform="translate(${fx},${fy}) rotate(${(fx-100)*0.35+(r()-0.5)*16+st.droop*14})"><path d="M0,0 C1,3 -1,6 0,8" stroke="${pal.dark}" stroke-width="1.6" fill="none"/><path d="M-2.5,7 L2.5,7 L3,9.5 L-3,9.5Z" fill="${pal.dark}"/>
+          <path d="M-4.2,9 C-6.2,18 -5.2,30 -2.4,40 C-1.2,44 1.6,45 2.4,40 C5,30 6.4,18 4.2,9Z" fill="${body}" stroke="${shade}" stroke-width=".8"/>
+          <path d="M-1.2,12 C-2.4,20 -1.6,28 0,36 M2,13 C2.6,20 2.2,26 1.4,31" stroke="${shade}" stroke-width=".8" opacity=".6" fill="none"/>
+          <path d="M-2.6,12 C-3.6,20 -3,28 -1.4,34" stroke="#fff" stroke-width="1.3" opacity=".45" fill="none"/></g>`;
+      }
     });
     return {body:s, potType:"terra"};
   },
