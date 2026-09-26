@@ -13,5 +13,5 @@ Yksitiedostoinen html-sovellus (`index.html`), ei build-vaihetta. Kieli suomi. �
 ## Testaus
 `node -e` syntaksitarkistus script-lohkoille tai avaa `index.html` selaimessa. Playwright-kuvakaappaus: `npx playwright screenshot index.html shot.png --full-page`.
 
-## Lähtödata
-`SEED` sisältää 26.9.2026 mittaukset. Kasvien sijainnit `PLANTS`-taulussa, koko `size: "s" | "l"`.
+## Data
+Mittaukset ovat yksityisessä repossa `wessmanjere/kasvikaksonen-data` (`data.json`), ei tässä julkisessa repossa. Älä lisää mittausdataa `index.html`-tiedostoon. Kaikki muutokset kulkevat `commit(op)` kautta: `applyOp()` ajaa saman operaation paikallisesti ja GitHubin versioon, `store.pending` on lähetysjono. Uusi muutostyyppi lisätään `applyOp()`-funktioon. Kasvien sijainnit `PLANTS`-taulussa, koko `size: "s" | "l"`.

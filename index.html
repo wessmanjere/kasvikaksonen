@@ -124,6 +124,14 @@ details summary{cursor:pointer;font-weight:600;color:var(--ink2)}
 .ai .answer{white-space:pre-wrap;background:var(--surface2);border-radius:10px;padding:12px;margin-top:10px;min-height:40px}
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;z-index:60;font-size:14px}
 .exportbox{margin-top:12px}
+.sync{display:inline-flex;align-items:center;gap:8px}
+.sync .dot{width:9px;height:9px;border-radius:50%;background:var(--ink3);flex:none}
+.sync.ok .dot{background:var(--good)} .sync.busy .dot{background:var(--info)} .sync.offline .dot{background:var(--warn)} .sync.error .dot{background:var(--bad)}
+.notice{background:var(--surface2);border-radius:10px;padding:12px;font-size:14px}
+.notice.bad{border-left:4px solid var(--bad)}
+ol.steps{padding-left:20px;margin:8px 0 0;font-size:14px;display:grid;gap:6px}
+.card a{color:var(--accent)}
+code{font-size:13px;background:var(--surface2);padding:1px 5px;border-radius:5px}
 .season{font-size:13px;color:var(--ink2);background:var(--surface2);padding:4px 10px;border-radius:999px}
 @media (max-width:560px){
   .plant{width:calc(50% - 6px)} .plant svg{width:110px;height:130px}
@@ -146,6 +154,7 @@ details summary{cursor:pointer;font-weight:600;color:var(--ink2)}
   </div>
   <div class="toolbar">
     <span class="season" id="season"></span>
+    <button id="syncBtn" class="ghost sync" aria-label="Synkronointi ja GitHub-avain"><span class="dot" id="syncDot"></span><span id="syncTxt">Lukutila</span></button>
     <button id="themeBtn" class="ghost" aria-label="Vaihda teema">Teema</button>
     <button id="exportBtn">Vie data</button>
   </div>
@@ -161,7 +170,7 @@ details summary{cursor:pointer;font-weight:600;color:var(--ink2)}
   <ul class="todo" id="todo"></ul>
 </section>
 
-<p class="muted small" style="margin-top:20px">Mittaukset tallentuvat tämän selaimen muistiin. Puhelin ja tietokone eivät jaa tietoja keskenään, vie data JSON-muodossa jos haluat siirtää sen.</p>
+<p class="muted small" style="margin-top:20px" id="syncNote"></p>
 </div>
 
 <div class="tip" id="tip"></div>
@@ -204,27 +213,39 @@ const PLANTS = [
   {id:"p9", sp:"dieffenbachia", floor:"k2", room:"2. kerros", label:"Kirjovehka"},
   {id:"p10", sp:"monstera", floor:"k3", room:"3. kerros", label:"Peikonlehti, 3. kerros"}
 ];
-const SEED = {
-  p1:[6.3,19,"kuiva"], p2:[6.1,18,"ok"], p3:[6.8,18,"ok"], p4:[7.0,17,"kuiva"], p5:[5.3,17,"ok"],
-  p6:[5.6,13,"ok"], p7:[5.9,18,"ok"], p8:[5.5,18,"ok"], p9:[5.3,18,"ok"], p10:[7.0,18,"kuiva"]
-};
+/* Mittausdata on yksityisessä repossa (data.json). localStorage on vain välimuisti ja lähetysjono. */
 const KEY="kasvikaksonen.v1";
 let store = null;
 function load(){
   try{ const raw=localStorage.getItem(KEY); if(raw){ store=JSON.parse(raw); migrate(); return; } }catch(e){}
-  store={ measurements:{}, targets:{}, theme:null };
-  PLANTS.forEach(p=>{ const s=SEED[p.id]; store.measurements[p.id]=[{date:"2026-09-26",ph:s[0],temp:s[1],moist:s[2],actions:[],note:""}]; });
-  migrate();
+  store={ v:3, measurements:{}, targets:{}, theme:null, pending:[], sync:{} };
 }
 function migrate(){
   store.v=store.v||1;
   if(store.v<2){
     const r=(store.measurements.p6||[]).find(x=>x.date==="2026-09-26");
     if(r){ r.actions=Array.from(new Set([...(r.actions||[]),"siirretty"])); r.note=r.note||"Siirretty ulkoa 2. kerrokseen mittauksen jälkeen (13 °C ulkona)"; }
-    store.v=2; save();
+    store.v=2;
   }
+  if(store.v<3){
+    // Aiemmin vain selaimeen tallennetut mittaukset jonoon, jotta ne siirtyvät GitHubiin eivätkä korvaa muiden laitteiden tietoja.
+    store.pending=[];
+    Object.entries(store.measurements||{}).forEach(([id,rows])=>rows.forEach(rec=>store.pending.push({op:"meas",plant:id,rec})));
+    Object.entries(store.targets||{}).forEach(([id,value])=>store.pending.push({op:"targets",plant:id,value}));
+    store.sync={}; store.v=3;
+  }
+  save();
 }
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(store)); }catch(e){} }
+function rowKey(r){ return `${r.date}|${r.ph}|${r.temp}`; }
+// Sama muutosoperaatio ajetaan paikallisesti heti ja GitHubin versioon synkronoinnissa.
+function applyOp(d,o){
+  d.measurements=d.measurements||{}; d.targets=d.targets||{};
+  if(o.op==="meas") d.measurements[o.plant]=(d.measurements[o.plant]||[]).filter(r=>r.date!==o.rec.date).concat([o.rec]);
+  else if(o.op==="del") d.measurements[o.plant]=(d.measurements[o.plant]||[]).filter(r=>rowKey(r)!==o.key);
+  else if(o.op==="targets"){ if(o.value) d.targets[o.plant]=o.value; else delete d.targets[o.plant]; }
+  else if(o.op==="replace"){ d.measurements[o.plant]=o.measurements||[]; if(o.targets) d.targets[o.plant]=o.targets; }
+}
 function targets(p){ return Object.assign({}, SPECIES[p.sp], store.targets[p.id]||{}); }
 function meas(p){ return (store.measurements[p.id]||[]).slice().sort((a,b)=>a.date<b.date?-1:1); }
 function latest(p){ const m=meas(p); return m[m.length-1]||null; }
@@ -517,8 +538,9 @@ function scoreColor(v){ return v>=75?"var(--good)":v>=50?"var(--warn)":"var(--ba
 function renderAll(){
   $("#todayDate").textContent = today.toLocaleDateString("fi-FI",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
   $("#season").textContent = "Vuodenaika: "+SEASON+(winterish?" (lepokausi)":"");
-  const avg=Math.round(PLANTS.reduce((a,p)=>a+(score(p).total||0),0)/PLANTS.length);
-  $("#subtitle").textContent = `${PLANTS.length} kasvia, kuntoindeksin keskiarvo ${avg}/100`;
+  const sc=PLANTS.map(p=>score(p).total).filter(v=>v!=null);
+  $("#subtitle").textContent = sc.length? `${PLANTS.length} kasvia, kuntoindeksin keskiarvo ${Math.round(sc.reduce((a,b)=>a+b,0)/sc.length)}/100` : `${PLANTS.length} kasvia, ei mittauksia näkyvissä`;
+  renderSync();
   // today
   const sug=suggestions();
   $("#todo").innerHTML = sug.length? sug.map(s=>`<li class="${s.level}"><span class="stripe"></span><div><div>${esc(s.text)}${s.plant?` <button class="plantlink" data-open="${s.plant.id}">avaa</button>`:""}</div><div class="rule">Sääntö: ${esc(s.rule)}</div></div></li>`).join("")
@@ -541,7 +563,8 @@ function plantCard(p){
     <div class="pname">${esc(SPECIES[p.sp].name)}</div><div class="plat">${esc(SPECIES[p.sp].latin)}</div></button>`;
 }
 document.addEventListener("click",e=>{
-  const b=e.target.closest("[data-open]"); if(b){ openPlant(b.dataset.open); }
+  const b=e.target.closest("[data-open]"); if(b){ openPlant(b.dataset.open); return; }
+  if(e.target.closest("[data-sync-open]")) openSync();
 });
 
 /* ---------- drawer ---------- */
@@ -574,7 +597,8 @@ function renderDrawer(){
     <button class="close" id="closeBtn" aria-label="Sulje">Sulje</button>
   </div>
 
-  <div class="card">
+  ${!canEdit()?`<div class="card"><h3>Uusi mittaus</h3><div class="notice">Lukutila. Mittauksia voi lisätä laitteella, jolle on yhdistetty GitHub-avain.</div>
+    <div class="row"><button class="primary" type="button" data-sync-open>Yhdistä avain</button></div></div>`:`<div class="card">
     <h3>Uusi mittaus</h3>
     <form id="mform">
       <div class="grid2">
@@ -586,9 +610,9 @@ function renderDrawer(){
       <div class="field" style="margin-top:10px"><label>Toimenpiteet</label>
         <div class="checks">${["kasteltu","lannoitettu","vaihdettu multa","siirretty"].map(a=>`<label class="chip"><input type="checkbox" name="act" value="${a}">${a}</label>`).join("")}</div></div>
       <div class="field" style="margin-top:10px"><label for="f_note">Huomio</label><input id="f_note" type="text" placeholder="esim. uusi lehti, ruskeat kärjet"></div>
-      <div class="row"><button class="primary" type="submit">Tallenna mittaus</button><span class="small muted">Kasvin ulkonäkö ja kuntoindeksi päivittyvät heti.</span></div>
+      <div class="row"><button class="primary" type="submit">Tallenna mittaus</button><span class="small muted">Kasvin ulkonäkö päivittyy heti, tallennus GitHubiin tapahtuu taustalla.</span></div>
     </form>
-  </div>
+  </div>`}
 
   <div class="card">
     <h3>Tila ja ennuste</h3>
@@ -610,12 +634,12 @@ function renderDrawer(){
     <div class="label" style="margin-top:8px">Lämpötila °C (tavoite ${t.temp[0]}–${t.temp[1]})</div>
     ${chart(hist.slice().reverse(),"temp",t.temp,[0,35],"°C")}
     <div class="tablewrap" style="margin-top:10px"><table class="hist"><thead><tr><th>Pvm</th><th>pH</th><th>°C</th><th>Kosteus</th><th>Toimenpiteet</th><th>Huomio</th><th></th></tr></thead>
-    <tbody>${hist.map((r,i)=>`<tr><td class="num">${fmt(r.date)}</td><td class="num">${r.ph}</td><td class="num">${r.temp}</td><td>${esc(r.moist)}</td><td>${esc((r.actions||[]).join(", "))}</td><td>${esc(r.note||"")}</td><td><button class="sm ghost" data-del="${r.date}|${r.ph}|${r.temp}" aria-label="Poista rivi">Poista</button></td></tr>`).join("")}</tbody></table></div>
+    <tbody>${hist.map((r,i)=>`<tr><td class="num">${fmt(r.date)}</td><td class="num">${r.ph}</td><td class="num">${r.temp}</td><td>${esc(r.moist)}</td><td>${esc((r.actions||[]).join(", "))}</td><td>${esc(r.note||"")}</td><td>${canEdit()?`<button class="sm ghost" data-del="${esc(rowKey(r))}" aria-label="Poista rivi">Poista</button>`:""}</td></tr>`).join("")}</tbody></table></div>
   </div>
 
   <div class="card">
     <h3>Tavoitearvot (muokattavat)</h3>
-    <form id="tform">
+    <form id="tform"><fieldset ${canEdit()?"":"disabled"} style="border:0;padding:0;margin:0;min-width:0">
       <div class="grid2">
         <div class="field"><label for="t_ph0">pH min</label><input id="t_ph0" type="number" step="0.1" value="${t.ph[0]}"></div>
         <div class="field"><label for="t_ph1">pH max</label><input id="t_ph1" type="number" step="0.1" value="${t.ph[1]}"></div>
@@ -628,7 +652,7 @@ function renderDrawer(){
       <div class="field" style="margin-top:10px"><label for="t_light">Valontarve</label><input id="t_light" type="text" value="${esc(t.light)}"></div>
       <div class="field" style="margin-top:10px"><label for="t_sens">Herkkyydet</label><textarea id="t_sens">${esc(t.sens)}</textarea></div>
       <div class="row"><button type="submit">Tallenna tavoitearvot</button><button type="button" class="ghost" id="resetT">Palauta lajin oletukset</button></div>
-    </form>
+    </fieldset></form>
   </div>
 
   <div class="card">
@@ -651,25 +675,24 @@ function renderDrawer(){
     <div class="answer" id="aiAns" hidden></div></div>`:""}
   `;
   $("#closeBtn").onclick=closePlant;
+  if(canEdit()){
   $("#mform").onsubmit=e=>{
     e.preventDefault();
     const acts=[...document.querySelectorAll('input[name="act"]:checked')].map(i=>i.value);
     const rec={date:$("#f_date").value, ph:+$("#f_ph").value, temp:+$("#f_temp").value, moist:$("#f_moist").value, actions:acts, note:$("#f_note").value.trim()};
-    store.measurements[p.id]=(store.measurements[p.id]||[]).filter(r=>r.date!==rec.date).concat([rec]);
-    save(); renderAll(); renderDrawer(); toast("Mittaus tallennettu");
+    commit({op:"meas",plant:p.id,rec}); renderDrawer(); toast("Mittaus tallennettu");
     $("#drawer").scrollTop=0;
   };
   $("#tform").onsubmit=e=>{
     e.preventDefault();
-    store.targets[p.id]={ ph:[+$("#t_ph0").value,+$("#t_ph1").value], temp:[+$("#t_t0").value,+$("#t_t1").value], dryDays:+$("#t_dry").value, fertSummer:+$("#t_fs").value, fertWinter:+$("#t_fw").value, light:$("#t_light").value, sens:$("#t_sens").value };
-    save(); renderAll(); renderDrawer(); toast("Tavoitearvot tallennettu");
+    commit({op:"targets",plant:p.id,value:{ ph:[+$("#t_ph0").value,+$("#t_ph1").value], temp:[+$("#t_t0").value,+$("#t_t1").value], dryDays:+$("#t_dry").value, fertSummer:+$("#t_fs").value, fertWinter:+$("#t_fw").value, light:$("#t_light").value, sens:$("#t_sens").value }});
+    renderDrawer(); toast("Tavoitearvot tallennettu");
   };
-  $("#resetT").onclick=()=>{ delete store.targets[p.id]; save(); renderAll(); renderDrawer(); toast("Lajin oletukset palautettu"); };
+  $("#resetT").onclick=()=>{ commit({op:"targets",plant:p.id,value:null}); renderDrawer(); toast("Lajin oletukset palautettu"); };
   document.querySelectorAll("[data-del]").forEach(b=>b.onclick=()=>{
-    const [d,ph,tp]=b.dataset.del.split("|");
-    store.measurements[p.id]=store.measurements[p.id].filter(r=>!(r.date===d&&String(r.ph)===ph&&String(r.temp)===tp));
-    save(); renderAll(); renderDrawer(); toast("Rivi poistettu");
+    commit({op:"del",plant:p.id,key:b.dataset.del}); renderDrawer(); toast("Rivi poistettu");
   });
+  }
   const aiBtn=$("#aiBtn"); if(aiBtn) aiBtn.onclick=askAI;
   wireTips();
 }
@@ -685,6 +708,7 @@ function nextWater(p){
 
 /* ---------- chart ---------- */
 function chart(rows,field,band,range,unit){
+  if(!rows.length) return `<div class="small muted" style="padding-block:10px">Ei mittauksia.</div>`;
   const W=600,H=150,L=34,R=10,T=10,B=24;
   const vals=rows.map(r=>+r[field]);
   let lo=Math.min(range[0],band[0]-0.5,...vals), hi=Math.max(range[1],band[1]+0.5,...vals);
@@ -725,7 +749,8 @@ async function askAI(){
 /* ---------- export ---------- */
 function exportData(){
   const rows=[]; PLANTS.forEach(p=>meas(p).forEach(r=>rows.push({kasvi:p.label,laji:SPECIES[p.sp].latin,kerros:FLOORS.find(f=>f.id===p.floor).name,huone:p.room,pvm:r.date,ph:r.ph,lampotila:r.temp,kosteus:r.moist,toimenpiteet:(r.actions||[]).join("; "),huomio:r.note||"",kuntoindeksi_nyt:score(p).total})));
-  const csv=[Object.keys(rows[0]).join(";")].concat(rows.map(r=>Object.values(r).map(v=>`"${String(v).replace(/"/g,'""')}"`).join(";"))).join("\n");
+  const head=["kasvi","laji","kerros","huone","pvm","ph","lampotila","kosteus","toimenpiteet","huomio","kuntoindeksi_nyt"];
+  const csv=[head.join(";")].concat(rows.map(r=>Object.values(r).map(v=>`"${String(v).replace(/"/g,'""')}"`).join(";"))).join("\n");
   const json=JSON.stringify({exported:new Date().toISOString(),plants:PLANTS.map(p=>({...p,targets:targets(p),measurements:meas(p)}))},null,2);
   $("#modal").innerHTML=`<div class="overlay" id="overlay"><aside class="drawer" role="dialog" aria-label="Vie data">
     <div class="dhead"><h2>Vie data</h2><button class="close" id="closeBtn">Sulje</button></div>
@@ -733,24 +758,150 @@ function exportData(){
       <div class="row">${(downloadsNs||!window.claude)?`<button class="primary" id="dlCsv">Lataa kasvit.csv</button>`:""}<button id="cpCsv">Kopioi CSV</button></div>
       <textarea class="exportbox" id="csvBox" rows="6" readonly>${esc(csv)}</textarea></div>
     <div class="card"><h3>JSON (täysi varmuuskopio)</h3>
-      <div class="row">${(downloadsNs||!window.claude)?`<button class="primary" id="dlJson">Lataa kasvit.json</button>`:""}<button id="cpJson">Kopioi JSON</button><button class="ghost" id="impBtn">Tuo JSON</button></div>
+      <div class="row">${(downloadsNs||!window.claude)?`<button class="primary" id="dlJson">Lataa kasvit.json</button>`:""}<button id="cpJson">Kopioi JSON</button>${canEdit()?`<button class="ghost" id="impBtn">Tuo JSON</button>`:""}</div>
       <textarea class="exportbox" id="jsonBox" rows="6">${esc(json)}</textarea>
-      <p class="small muted">Tuonti: liitä toisesta laitteesta viety JSON kenttään ja paina Tuo JSON. Se korvaa tämän selaimen tiedot.</p></div>
+      <p class="small muted">${canEdit()?"Tuonti: liitä varmuuskopio kenttään ja paina Tuo JSON. Se korvaa tuotujen kasvien tiedot myös GitHubissa.":"Tuonti on käytössä, kun laitteelle on yhdistetty GitHub-avain."}</p></div>
   </aside></div>`;
   $("#closeBtn").onclick=closePlant; $("#overlay").addEventListener("click",e=>{ if(e.target.id==="overlay") closePlant(); });
   const copy=(txt,el)=>{ navigator.clipboard?.writeText(txt).then(()=>toast("Kopioitu")).catch(()=>{ el.select(); toast("Valitse teksti ja kopioi"); }); };
   $("#cpCsv").onclick=()=>copy(csv,$("#csvBox")); $("#cpJson").onclick=()=>copy(json,$("#jsonBox"));
   if(downloadsNs){ $("#dlCsv").onclick=()=>downloadsNs.save({filename:"kasvit.csv",data:"﻿"+csv}).catch(()=>toast("Lataus peruttiin")); $("#dlJson").onclick=()=>downloadsNs.save({filename:"kasvit.json",data:json}).catch(()=>toast("Lataus peruttiin")); }
-  $("#impBtn").onclick=()=>{ try{ const d=JSON.parse($("#jsonBox").value); if(!d.plants) throw 0; d.plants.forEach(pl=>{ if(store.measurements[pl.id]!==undefined||PLANTS.some(p=>p.id===pl.id)){ store.measurements[pl.id]=pl.measurements||[]; if(pl.targets) store.targets[pl.id]=pl.targets; } }); save(); renderAll(); closePlant(); toast("Tiedot tuotu"); }catch(e){ toast("JSON ei kelpaa"); } };
+  if($("#impBtn")) $("#impBtn").onclick=()=>{ try{ const d=JSON.parse($("#jsonBox").value); if(!d.plants) throw 0; const ops=d.plants.filter(pl=>PLANTS.some(p=>p.id===pl.id)).map(pl=>({op:"replace",plant:pl.id,measurements:pl.measurements||[],targets:pl.targets||null})); if(!ops.length) throw 0; commit(...ops); closePlant(); toast("Tiedot tuotu"); }catch(e){ toast("JSON ei kelpaa"); } };
 }
 $("#exportBtn").onclick=exportData;
+
+/* ---------- GitHub sync ---------- */
+const TOKEN_KEY="kasvikaksonen.token", DEFAULT_REPO="wessmanjere/kasvikaksonen-data", DATA_PATH="data.json";
+function getToken(){ try{ return localStorage.getItem(TOKEN_KEY)||""; }catch(e){ return ""; } }
+function setToken(t){ try{ if(t) localStorage.setItem(TOKEN_KEY,t); else localStorage.removeItem(TOKEN_KEY); }catch(e){} }
+function canEdit(){ return !!getToken(); }
+function dataRepo(){ return store.sync.repo||DEFAULT_REPO; }
+const b64enc=s=>{ let bin=""; new TextEncoder().encode(s).forEach(b=>bin+=String.fromCharCode(b)); return btoa(bin); };
+const b64dec=s=>new TextDecoder().decode(Uint8Array.from(atob(s.replace(/\s/g,"")),c=>c.charCodeAt(0)));
+let syncStatus="readonly", syncMsg="";
+
+async function gh(method,path,body,token=getToken(),repo=dataRepo()){
+  let r;
+  try{ r=await fetch(`https://api.github.com/repos/${repo}${path}`,{method,cache:"no-store",headers:{Accept:"application/vnd.github+json",Authorization:`Bearer ${token}`,"X-GitHub-Api-Version":"2022-11-28"},body:body?JSON.stringify(body):undefined}); }
+  catch(e){ const err=new Error("Yhteys GitHubiin ei onnistu"); err.offline=true; throw err; }
+  let j=null; try{ j=await r.json(); }catch(e){}
+  return {status:r.status, ok:r.ok, j};
+}
+function ghError(status){
+  if(status===401) return new Error("Avain ei kelpaa tai se on vanhentunut");
+  if(status===403) return new Error("Avaimella ei ole kirjoitusoikeutta (Contents: Read and write) tai pyyntöraja täyttyi");
+  if(status===404) return new Error(`Repoa ${dataRepo()} ei löydy tai avaimella ei ole siihen pääsyä`);
+  return new Error(`GitHub vastasi virheellä ${status}`);
+}
+function commitMsg(ops){
+  const kind={meas:"Mittaus",del:"Poisto",targets:"Tavoitearvot",replace:"Tuonti"};
+  const kinds=[...new Set(ops.map(o=>kind[o.op]))].join(", ");
+  const names=[...new Set(ops.map(o=>PLANTS.find(p=>p.id===o.plant)?.label||o.plant))];
+  return `${kinds}: ${names.slice(0,3).join(", ")}${names.length>3?` ja ${names.length-3} muuta`:""}`;
+}
+// GitHubin versio on totuus, jonossa olevat omat muutokset ajetaan sen päälle.
+function adopt(remote,sha){
+  store.measurements=remote.measurements||{}; store.targets=remote.targets||{};
+  store.pending.forEach(o=>applyOp(store,o));
+  store.sync.sha=sha; store.sync.at=new Date().toISOString();
+  save(); renderAll();
+}
+function commit(...ops){ ops.forEach(o=>{ applyOp(store,o); store.pending.push(o); }); save(); renderAll(); sync(); }
+
+let syncing=null, syncAgain=false;
+function sync(){
+  if(!canEdit()){ setSync("readonly"); return Promise.resolve(); }
+  if(syncing){ syncAgain=true; return syncing; }
+  syncing=(async()=>{ do{ syncAgain=false; await syncOnce(); }while(syncAgain); })().finally(()=>{ syncing=null; });
+  return syncing;
+}
+async function syncOnce(){
+  if(navigator.onLine===false){ setSync("offline","Ei verkkoyhteyttä"); return; }
+  setSync("busy");
+  try{
+    for(let attempt=0; attempt<4; attempt++){
+      const g=await gh("GET",`/contents/${DATA_PATH}`);
+      let remote={schema:1,measurements:{},targets:{}}, sha=null;
+      if(g.ok){ remote=JSON.parse(b64dec(g.j.content)); sha=g.j.sha; }
+      else if(g.status===404){ const r=await gh("GET",""); if(!r.ok) throw ghError(r.status); }
+      else throw ghError(g.status);
+      const ops=store.pending.slice();
+      if(!ops.length && sha){ if(sha!==store.sync.sha) adopt(remote,sha); else { store.sync.at=new Date().toISOString(); save(); } setSync("ok"); return; }
+      ops.forEach(o=>applyOp(remote,o)); remote.schema=1; remote.updated=new Date().toISOString();
+      const put=await gh("PUT",`/contents/${DATA_PATH}`,{message:commitMsg(ops),content:b64enc(JSON.stringify(remote,null,1)),...(sha?{sha}:{})});
+      if(put.ok){ store.pending=store.pending.slice(ops.length); adopt(remote,put.j.content.sha); if(store.pending.length) syncAgain=true; setSync("ok"); return; }
+      if(put.status===409||put.status===422) continue; // toinen laite ehti väliin, haetaan uusin ja yritetään uudelleen
+      throw ghError(put.status);
+    }
+    throw new Error("Tallennus törmäsi toistuvasti toisen laitteen muutokseen, yritä uudelleen");
+  }catch(e){ setSync(e.offline?"offline":"error", e.message); }
+}
+function setSync(status,msg=""){ const changed=status!==syncStatus||msg!==syncMsg; syncStatus=status; syncMsg=msg; renderSync(); if(changed && $("#syncView") && !$("#tokForm")) renderSyncView(); }
+function renderSync(){
+  const n=store.pending.length;
+  const txt={readonly:"Lukutila", busy:"Tallennetaan...", ok:n?`${n} odottaa`:"Synkronoitu", offline:n?`Ei yhteyttä, ${n} odottaa`:"Ei yhteyttä", error:"Synkronointivirhe"}[syncStatus];
+  $("#syncBtn").className=`ghost sync ${syncStatus}`; $("#syncTxt").textContent=txt;
+  const at=store.sync.at?new Date(store.sync.at).toLocaleString("fi-FI",{day:"numeric",month:"numeric",hour:"2-digit",minute:"2-digit"}):null;
+  $("#syncNote").textContent = canEdit()
+    ? `Mittaukset tallentuvat yksityiseen GitHub-repoon ${dataRepo()}, josta kaikki laitteet lukevat ne.${at?` Viimeksi synkronoitu ${at}.`:""}${n?` ${n} muutosta odottaa lähetystä.`:""}`
+    : "Lukutila. Mittausdata on yksityisessä GitHub-repossa, ja se näkyy ja muokkautuu vain laitteella, jolle on yhdistetty GitHub-avain.";
+}
+function openSync(){
+  $("#modal").innerHTML=`<div class="overlay" id="overlay"><aside class="drawer" role="dialog" aria-modal="true" aria-label="Synkronointi" id="syncView"></aside></div>`;
+  renderSyncView();
+  $("#overlay").addEventListener("click",e=>{ if(e.target.id==="overlay") closePlant(); });
+  document.addEventListener("keydown",escClose);
+}
+function renderSyncView(){
+  const v=$("#syncView"), n=store.pending.length;
+  const at=store.sync.at?new Date(store.sync.at).toLocaleString("fi-FI"):"ei vielä";
+  v.innerHTML=`<div class="dhead"><h2>Synkronointi</h2><button class="close" id="closeBtn">Sulje</button></div>
+  <div class="card"><h3>Tila</h3>
+    <dl class="kv"><dt>Datarepo</dt><dd>${esc(dataRepo())} (yksityinen)</dd><dt>Tällä laitteella</dt><dd>${canEdit()?"GitHub-avain tallennettu, muokkaus sallittu":"ei avainta, lukutila"}</dd>
+    <dt>Viimeksi synkronoitu</dt><dd>${esc(at)}</dd><dt>Odottaa lähetystä</dt><dd class="num">${n} muutosta</dd></dl>
+    ${syncMsg&&syncStatus!=="ok"?`<div class="notice ${syncStatus==="error"?"bad":""}" style="margin-top:12px">${esc(syncMsg)}</div>`:""}
+    ${canEdit()?`<div class="row"><button class="primary" id="syncNow" ${syncStatus==="busy"?"disabled":""}>${syncStatus==="busy"?"Synkronoidaan...":"Synkronoi nyt"}</button><button class="ghost" id="forget">Poista avain tältä laitteelta</button></div>`:""}
+  </div>
+  ${canEdit()?"":`<div class="card"><h3>Yhdistä GitHub-avain</h3>
+    <p class="small muted" style="margin-top:0">Avain tallentuu vain tämän laitteen selaimeen. Tee jokaiselle laitteelle oma avain, niin voit perua yhden kerrallaan.</p>
+    <ol class="steps">
+      <li>Avaa <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">github.com/settings/personal-access-tokens/new</a> (Settings, Developer settings, Personal access tokens, Fine-grained tokens, Generate new token).</li>
+      <li>Token name: esim. <code>Kasvikaksonen puhelin</code>. Expiration: esim. 1 vuosi.</li>
+      <li>Repository access: <b>Only select repositories</b> ja valitse <code>kasvikaksonen-data</code>.</li>
+      <li>Permissions, Repository permissions: <b>Contents</b> arvoon <b>Read and write</b>. Muita oikeuksia ei tarvita.</li>
+      <li>Paina Generate token, kopioi avain (alkaa <code>github_pat_</code>) ja liitä se alle.</li>
+    </ol>
+    <form id="tokForm" style="margin-top:12px">
+      <div class="field"><label for="tok">GitHub-avain</label><input id="tok" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_..." required></div>
+      <div class="field" style="margin-top:10px"><label for="tokRepo">Datarepo</label><input id="tokRepo" type="text" value="${esc(dataRepo())}" spellcheck="false"></div>
+      <div class="row"><button class="primary" type="submit" id="tokBtn">Yhdistä</button><span class="small muted" id="tokMsg"></span></div>
+    </form></div>`}`;
+  $("#closeBtn").onclick=closePlant;
+  if($("#syncNow")) $("#syncNow").onclick=()=>sync();
+  if($("#forget")) $("#forget").onclick=()=>{ if(store.pending.length && !confirm(`${store.pending.length} muutosta ei ole vielä lähetetty GitHubiin ja ne katoavat. Poistetaanko avain silti?`)) return; setToken(""); store.pending=[]; store.measurements={}; store.targets={}; store.sync={repo:store.sync.repo}; save(); setSync("readonly"); renderAll(); toast("Avain poistettu tältä laitteelta"); };
+  if($("#tokForm")) $("#tokForm").onsubmit=async e=>{
+    e.preventDefault();
+    const tok=$("#tok").value.trim(), repo=$("#tokRepo").value.trim()||DEFAULT_REPO;
+    $("#tokBtn").disabled=true; $("#tokMsg").textContent="Tarkistetaan...";
+    try{
+      const r=await gh("GET","",null,tok,repo);
+      if(!r.ok){ store.sync.repo=repo; throw ghError(r.status); }
+      store.sync.repo=repo; setToken(tok); save();
+      await sync(); renderSyncView(); toast(syncStatus==="ok"?"Yhdistetty GitHubiin":"Avain tallennettu, synkronointi ei vielä onnistunut");
+    }catch(err){ const m=$("#tokMsg"); if(m){ m.textContent=err.message; $("#tokBtn").disabled=false; } }
+  };
+}
 
 /* ---------- theme & misc ---------- */
 function applyTheme(){ const t=store.theme; if(t) document.documentElement.setAttribute("data-theme",t); else document.documentElement.removeAttribute("data-theme"); }
 $("#themeBtn").onclick=()=>{ const dark=matchMedia("(prefers-color-scheme: dark)").matches; const cur=store.theme||(dark?"dark":"light"); store.theme=cur==="dark"?"light":"dark"; save(); applyTheme(); };
 let toastT; function toast(msg){ let el=$(".toast"); if(!el){ el=document.createElement("div"); el.className="toast"; document.body.appendChild(el); } el.textContent=msg; clearTimeout(toastT); toastT=setTimeout(()=>el.remove(),2200); }
 
-load(); applyTheme(); renderAll();
+$("#syncBtn").onclick=openSync;
+addEventListener("online",()=>sync());
+document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible") sync(); });
+
+load(); applyTheme(); renderAll(); sync();
 </script>
 
 </body>
