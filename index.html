@@ -193,7 +193,11 @@ const SPECIES = {
   spider:{ name:"Rönsylilja", latin:"Chlorophytum comosum", ph:[6.0,7.0], temp:[15,26], dryDays:5, fertSummer:30, fertWinter:0,
     light:"Kirkas epäsuora valo", sens:"Hanaveden fluoridi, kalkki ja kloori (ruskeat lehdenkärjet), suora paahde" },
   dieffenbachia:{ name:"Kirjovehka", latin:"Dieffenbachia", ph:[6.0,6.5], temp:[18,27], dryDays:3, fertSummer:30, fertWinter:0,
-    light:"Epäsuora valo, sietää puolivarjoa", sens:"Kylmä veto, ylikastelu, mehu on myrkyllistä" }
+    light:"Epäsuora valo, sietää puolivarjoa", sens:"Kylmä veto, ylikastelu, mehu on myrkyllistä" },
+  rubber:{ name:"Kumiviikuna", latin:"Ficus elastica", ph:[6.0,7.0], temp:[16,27], dryDays:5, fertSummer:30, fertWinter:0,
+    light:"Kirkas epäsuora valo, sietää aamuaurinkoa", sens:"Ylikastelu ja seisova vesi (lehdet kellastuvat ja putoavat), kylmä veto, paikan vaihto" },
+  palm:{ name:"Sirovuoripalmu", latin:"Chamaedorea elegans", ph:[5.5,6.5], temp:[16,27], dryDays:3, fertSummer:30, fertWinter:0,
+    light:"Puolivarjo, sietää vähän valoa, ei suoraa aurinkoa", sens:"Kuiva huoneilma (vihannespunkit), hanaveden suolat, ylikastelu talvella" }
 };
 const FLOORS = [
   {id:"k3", name:"3. kerros", rooms:["3. kerros"]},
@@ -211,7 +215,9 @@ const PLANTS = [
   {id:"p7", sp:"spider", floor:"k2", room:"2. kerros", label:"Rönsylilja"},
   {id:"p8", sp:"pothos", floor:"k2", room:"2. kerros", label:"Kultaköynnös, 2. kerros", size:"l"},
   {id:"p9", sp:"dieffenbachia", floor:"k2", room:"2. kerros", label:"Kirjovehka"},
-  {id:"p10", sp:"monstera", floor:"k3", room:"3. kerros", label:"Peikonlehti, 3. kerros"}
+  {id:"p10", sp:"monstera", floor:"k3", room:"3. kerros", label:"Peikonlehti, 3. kerros"},
+  {id:"p11", sp:"rubber", floor:"k1", room:"Keittiö", label:"Kumiviikuna"},
+  {id:"p12", sp:"palm", floor:"k1", room:"Keittiö", label:"Sirovuoripalmu"}
 ];
 /* Mittausdata on yksityisessä repossa (data.json). localStorage on vain välimuisti ja lähetysjono. */
 const KEY="kasvikaksonen.v1";
@@ -505,6 +511,47 @@ const ART = {
     const dy=st.droop*20;
     s+=stem(`M100,194 C130,170 150,150 160,${125+dy}`,mix(pal.c,"#e8dfa0",0.4),1.5);
     for(let i=0;i<7;i++){ const a=-70+i*23; s+=`<g transform="translate(160,${125+dy}) rotate(${a})"><path d="${lanceolate(22,2.5)}" fill="url(#${id}g)" stroke="${pal.edge}" stroke-width=".6"/></g>`; }
+    return {body:s, potType:"ceramic"};
+  },
+  rubber(id,st){
+    // Pysty runko, vuorottaiset isot kiiltävät soikeat lehdet, latvassa punertava uuden lehden tuppi
+    const pal=palette("#24512d",st); let s="";
+    const top=52+st.droop*14, bend=st.droop*6;
+    s+=stem(`M100,197 Q${98+bend},125 ${101+bend*2},${top}`,"#5a4a32",4.5);
+    const leaves=[{y:178,L:46,a:-62},{y:164,L:52,a:58},{y:146,L:56,a:-54},{y:128,L:54,a:52},{y:110,L:50,a:-46},{y:93,L:44,a:42},{y:77,L:36,a:-30},{y:64,L:28,a:22}];
+    leaves.forEach((lf,i)=>{
+      const t=(197-lf.y)/(197-top); const x=100+bend*2*t*t, y=197-(197-top)*t;
+      const side=lf.a<0?-1:1, ang=lf.a+side*st.droop*38;
+      const W=lf.L*0.36, path=leafPath(lf.L,W);
+      s+=stem(`M${x},${y} l${side*4},-3`,"#5a4a32",1.8);
+      s+=`<g transform="translate(${x+side*4},${y-3}) rotate(${ang})">${leaf(path,id,pal,lf.L,W,"",mix(pal.light,"#d98a8a",0.25))}<path d="M${-W*0.35},${-lf.L*0.3} Q${-W*0.5},${-lf.L*0.6} ${-W*0.15},${-lf.L*0.85}" stroke="#fff" stroke-width="2" opacity=".22" fill="none"/></g>`;
+    });
+    s+=`<g transform="translate(${101+bend*2},${top+2}) rotate(${bend*2})"><path d="M-3,0 C-4,-10 -1,-20 1,-24 C3,-18 4,-8 3,0Z" fill="${mix("#b8455a","#8a9a8c",st.cold*0.35)}"/><path d="M-1,-2 C-1.5,-10 0,-17 1,-21" stroke="#fff" stroke-width="1" opacity=".35" fill="none"/></g>`;
+    return {body:s, potType:"terra"};
+  },
+  palm(id,st){
+    // Useita ohuita varsia, kaarevat parilehdykkäiset lehdet
+    const pal=palette("#3d7d3a",st), r=rng(11); let s="";
+    const fronds=[{a:-50,L:120},{a:44,L:124},{a:-18,L:150},{a:14,L:140},{a:66,L:92}];
+    fronds.forEach((f,fi)=>{
+      const bx=100+(r()-0.5)*10, by=196;
+      const rad=f.a*Math.PI/180;
+      const ex=bx+Math.sin(rad)*f.L*(0.95+st.droop*0.2), ey=by-Math.cos(rad)*f.L*(0.62-st.droop*0.4);
+      const cx=bx+Math.sin(rad)*f.L*0.3, cy=by-f.L*(0.95-st.droop*0.3);
+      s+=stem(`M${bx},${by} Q${cx},${cy} ${ex},${ey}`,shadeHex(pal.c,0.7),1.6);
+      const n=9;
+      for(let i=3;i<=n;i++){
+        const t=i/n, u=1-t;
+        const x=u*u*bx+2*u*t*cx+t*t*ex, y=u*u*by+2*u*t*cy+t*t*ey;
+        const dx=2*u*(cx-bx)+2*t*(ex-cx), dy=2*u*(cy-by)+2*t*(ey-cy);
+        const dir=Math.atan2(dx,-dy)*180/Math.PI;
+        const L=(12+Math.sin(t*Math.PI)*16)*(1-st.droop*0.15), W=2.8;
+        [-1,1].forEach(side=>{
+          const ang=dir+side*(50-t*15+st.droop*40);
+          s+=`<g transform="translate(${x},${y}) rotate(${ang})"><path d="${lanceolate(L,W)}" fill="url(#${id}g)" stroke="${pal.edge}" stroke-width=".6"/><path d="M0,0 L0,${-L*0.9}" stroke="${pal.light}" stroke-width=".5" opacity=".5"/></g>`;
+        });
+      }
+    });
     return {body:s, potType:"ceramic"};
   },
   dieffenbachia(id,st){
